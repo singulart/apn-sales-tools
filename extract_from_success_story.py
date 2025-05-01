@@ -36,36 +36,43 @@ def spacy_extract(text):
         # Check if the sentence matches the user's pattern
         if 'says' in sent.text:
             # Process the sentence
+            print(f"RAW Sentence: {sent.text}")
             sent_doc = nlp(sent.text)
-            
-            for ent in sent_doc.ents:
-                
-                # Extracting company (naïvely)
-                parts = sent_doc.text.rsplit(" at ", 1)
-                if len(parts) == 2:
-                    company = parts[1].strip()
-                else:
-                    company = None
-                # Find PERSON entities
-                if ent.label_ == "PERSON":
-                    # Extract first name and last name
-                    first_name, last_name = extract_names(ent)
-                    
-                    # Find appositional modifiers (for title and company)
-                    for token in sent_doc:
-                        if token.dep_ == "appos" and token.head in ent:
-                            # Extract role text
-                            role_tokens = [t for t in token.subtree if t.pos_ != "PUNCT"]
-                            role_text = " ".join(t.text for t in role_tokens)
-                            # Extracting title
-                            parts = role_text.rsplit(" at ", 1)
-                            if len(parts) == 2:
-                                title = parts[0].strip()
-                            else:
-                                title = role_text.strip()
-                            # Print extracted information
-                            print(f"First Name: {first_name}, Last Name: {last_name}, Title: {title}, Company: {company}")
-                            extracted.append([company, first_name, last_name, title])
+            person_ents = [ent for ent in sent_doc.ents if ent.label_ == "PERSON"]
+            org_ents = [ent for ent in sent_doc.ents if ent.label_ == "ORG"]
+
+            for person_ent in person_ents:
+                first_name, last_name = extract_names(person_ent)
+
+                company = None  # default
+
+                # Try to find ORG that appears after "at" inside the role text
+                role_text = None
+
+                for token in sent_doc:
+                    if token.dep_ == "appos" and token.head in person_ent:
+                        role_tokens = [t for t in token.subtree if t.pos_ != "PUNCT"]
+                        role_text = " ".join(t.text for t in role_tokens)
+                        break
+
+                if role_text:
+                    # If "at X" is in title, try parsing it directly
+                    if " at " in role_text:
+                        title_part, org_candidate = role_text.rsplit(" at ", 1)
+                        title = title_part.strip()
+                        company = org_candidate.strip()
+                    else:
+                        title = role_text.strip()
+                        # fallback to ORG entities only if not already set
+                        if org_ents:
+                            company = org_ents[-1].text  # choose the one closer to the end (more likely to be real org)
+
+                    if company and company in title:
+                        title = title.replace(company, '').replace('at', '').replace('for', '').strip()
+                    # 'Good' sentences is the ones having all data points present. 
+                    if all([first_name, last_name, title, company]):
+                        print(f"First Name: {first_name}, Last Name: {last_name}, Title: {title}, Company: {company}")
+                        extracted.append([company, first_name, last_name, title])
     return extracted                   
 
 # Process a Success Story from AWS APN portal and extract data for further sales automation
